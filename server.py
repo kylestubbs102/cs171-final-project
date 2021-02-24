@@ -12,6 +12,8 @@ serverPID = None                  # server's own PID from args
 configData = None                 # json config data
 lock = threading.Lock()           # lock
 
+serverBind = None
+otherClients = []
 
 def doExit():
     global otherServers
@@ -25,8 +27,6 @@ def doExit():
 
 
 def userInput():
-    global activeRequest
-
     while True:
         x = input()
 
@@ -52,10 +52,12 @@ def connectToServers():
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.connect((socket.gethostname(), configData[i]))
+            msg_send = 'server ' + serverPID 
+            sock.sendall(msg_send.encode())
             otherServers.append([sock, str(i)])
 
 
-def onNewClientConnection(serverSocket, addr):
+def onNewServerConnection(serverSocket, addr):
     # handle messages from other clients
     print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
     serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -72,6 +74,20 @@ def onNewClientConnection(serverSocket, addr):
     serverSocket.close()
 
 
+def onNewClientConnection(clientSocket, addr):
+    global otherClients
+    otherClients.append(clientSocket)
+    clientSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    while True:
+        try:
+            msg = clientSocket.recv(2048).decode()
+        except socket.error:
+            clientSocket.close()
+        if not msg:
+            clientSocket.close()
+        if (msg != ''):
+            print(msg)
+
 def watch():
     global serverSock
     serverSock = socket.socket()
@@ -80,9 +96,14 @@ def watch():
     serverSock.listen(32)
     while True:
         c, addr = serverSock.accept()
-        threading.Thread(target=onNewClientConnection,
-                         args=(c, addr)).start()
-
+        msg_recv = c.recv(2048).decode()
+        if 'server' in msg_recv:
+            threading.Thread(target=onNewServerConnection,
+                            args=(c, addr)).start()
+        else:
+            threading.Thread(target=onNewClientConnection,
+                            args=(c, addr)).start()
+     
 
 def main():
     global configData
