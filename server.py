@@ -4,6 +4,8 @@ import threading
 import os
 import time
 import json
+from queue import Queue
+from blockchain import blockchain
 from datetime import datetime
 
 otherServers = []                 # array of [socket, id]
@@ -14,6 +16,12 @@ lock = threading.Lock()           # lock
 
 serverBind = None
 otherClients = []
+
+# data structures
+bc = None
+queue = Queue()
+keyvalue = {}
+
 
 def doExit():
     global otherServers
@@ -29,16 +37,29 @@ def doExit():
 def userInput():
     while True:
         x = input()
-
-        commandList = x.split("'", 1)
+        commandList = x.split(" ")
         command = commandList[0].strip()
         if(command == 'connect'):
             threading.Thread(target=connectToServers).start()
-        elif(command == 'send'):
+            threading.Thread(target=connectToClients).start()
+        elif(command == 'sendall'):
+            test = "testing from server " + str(serverPID)
+            test = test.encode()
             for sock in otherServers:
-                test = "testing from server " + str(serverPID)
-                test = test.encode()
                 sock[0].sendall(test)
+            for sock in otherClients:
+                sock[0].sendall(test)
+        elif(command == 'send'):
+            pid = commandList[1]
+            test = "testing individual from server " + str(serverPID)
+            test = test.encode()
+            for sock in otherServers:
+                if(sock[1] == str(pid)):
+                    sock[0].sendall(test)
+            for sock in otherClients:
+                if(sock[1] == str(pid)):
+                    sock[0].sendall(test)
+
         elif(command == 'exit'):
             doExit()
 
@@ -46,12 +67,12 @@ def userInput():
 def connectToServers():
     global otherServers
 
-    for i in range(1,6):
+    for i in range(1, 6):
         if(i != int(serverPID)):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.connect((socket.gethostname(), configData[str(i)]))
-            msg_send = 'server ' + serverPID 
+            msg_send = 'server ' + serverPID
             sock.sendall(msg_send.encode())
             otherServers.append([sock, str(i)])
 
@@ -76,15 +97,14 @@ def onNewServerConnection(serverSocket, addr):
 def connectToClients():
     global otherClients
 
-    for i in range(6,9):
+    for i in range(6, 9):
         if(i != int(serverPID)):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.connect((socket.gethostname(), configData[str(i)]))
-            msg_send = 'server ' + serverPID 
+            msg_send = 'server ' + serverPID
             sock.sendall(msg_send.encode())
             otherClients.append([sock, str(i)])
-
 
 
 def onNewClientConnection(clientSocket, addr, pid):
@@ -100,6 +120,7 @@ def onNewClientConnection(clientSocket, addr, pid):
         if (msg != ''):
             print(msg)
 
+
 def watch():
     global serverSock
     serverSock = socket.socket()
@@ -112,15 +133,17 @@ def watch():
         msgs = msg_recv.split()
         if 'server' in msg_recv:
             threading.Thread(target=onNewServerConnection,
-                            args=(c, addr)).start()
+                             args=(c, addr)).start()
         else:
             threading.Thread(target=onNewClientConnection,
-                            args=(c, addr, msgs[1])).start()
-     
+                             args=(c, addr, msgs[1])).start()
+
 
 def main():
     global configData
     global serverPID
+    global bc
+
     if len(sys.argv) != 2:
         print(f'Usage: python {sys.argv[0]} <process_id>')
         sys.exit()
@@ -128,6 +151,13 @@ def main():
     f = open('config.json')
     configData = json.load(f)
     serverPID = sys.argv[1]
+    bc = blockchain(serverPID)
+    bc.print()
+    # bc.add("put alice 8435928285")
+    # bc.add("get alice")
+    # bc.add("put bob 8589452")
+    # bc.writeToFile()
+
     # print(configData[clientPID])
 
     try:
