@@ -46,12 +46,11 @@ def userInput():
 def connectToServers():
     global otherServers
 
-    otherServers = []
-    for i in configData:
-        if(i != serverPID):
+    for i in range(1,6):
+        if(i != int(serverPID)):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.connect((socket.gethostname(), configData[i]))
+            sock.connect((socket.gethostname(), configData[str(i)]))
             msg_send = 'server ' + serverPID 
             sock.sendall(msg_send.encode())
             otherServers.append([sock, str(i)])
@@ -74,9 +73,22 @@ def onNewServerConnection(serverSocket, addr):
     serverSocket.close()
 
 
-def onNewClientConnection(clientSocket, addr):
+def connectToClients():
     global otherClients
-    otherClients.append(clientSocket)
+
+    for i in range(6,9):
+        if(i != int(serverPID)):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.connect((socket.gethostname(), configData[str(i)]))
+            msg_send = 'server ' + serverPID 
+            sock.sendall(msg_send.encode())
+            otherClients.append([sock, str(i)])
+
+
+
+def onNewClientConnection(clientSocket, addr, pid):
+    global otherClients
     clientSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     while True:
         try:
@@ -97,12 +109,13 @@ def watch():
     while True:
         c, addr = serverSock.accept()
         msg_recv = c.recv(2048).decode()
+        msgs = msg_recv.split()
         if 'server' in msg_recv:
             threading.Thread(target=onNewServerConnection,
                             args=(c, addr)).start()
         else:
             threading.Thread(target=onNewClientConnection,
-                            args=(c, addr)).start()
+                            args=(c, addr, msgs[1])).start()
      
 
 def main():
