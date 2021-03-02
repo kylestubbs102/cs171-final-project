@@ -14,7 +14,14 @@ clientPID = None
 
 
 def doExit():
-    print('do exit')
+    global servers
+    global clientSock
+
+    sys.stdout.flush()
+    clientSock.close()
+    for sock in servers:
+        sock[0].close()
+    os._exit(1)
 
 
 def userInput():
@@ -25,7 +32,6 @@ def userInput():
         command = commandList[0].strip()
         if(command == 'connect'):
             threading.Thread(target=connectToServers).start()
-
         elif(command == 'sendall'):
             for sock in servers:
                 test = "testing from client " + str(clientPID)
@@ -38,7 +44,6 @@ def userInput():
                 if(sock[1] == str(pid)):
                     sock[0].sendall(test)
         elif(command == 'exit'):
-
             doExit()
 
 
@@ -107,7 +112,7 @@ def main():
         try:
             pass
         except KeyboardInterrupt:
-            print('doExit here')
+            doExit()
 
 
 if __name__ == "__main__":

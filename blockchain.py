@@ -4,8 +4,6 @@ import os.path
 import string
 import random
 
-# blockchain class roots
-
 
 class blockchain:
     def __init__(self, fname):

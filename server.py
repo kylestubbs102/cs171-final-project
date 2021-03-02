@@ -35,9 +35,11 @@ def doExit():
 
 
 def userInput():
+    global bc
+
     while True:
         x = input()
-        commandList = x.split(" ")
+        commandList = x.split(" ", 1)
         command = commandList[0].strip()
         if(command == 'connect'):
             threading.Thread(target=connectToServers).start()
@@ -59,7 +61,12 @@ def userInput():
             for sock in otherClients:
                 if(sock[1] == str(pid)):
                     sock[0].sendall(test)
-
+        elif(command == 'blockchain'):
+            op = commandList[1]
+            bc.add(op)
+            bc.writeToFile()
+        elif(command == 'bcprint'):
+            bc.print()
         elif(command == 'exit'):
             doExit()
 
@@ -109,6 +116,7 @@ def connectToClients():
 
 def onNewClientConnection(clientSocket, addr, pid):
     global otherClients
+    print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
     clientSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     while True:
         try:
@@ -152,7 +160,7 @@ def main():
     configData = json.load(f)
     serverPID = sys.argv[1]
     bc = blockchain(serverPID)
-    bc.print()
+    # bc.print()
     # bc.add("put alice 8435928285")
     # bc.add("get alice")
     # bc.add("put bob 8589452")
