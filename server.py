@@ -61,7 +61,7 @@ def userInput():
             for sock in otherClients:
                 if(sock[1] == str(pid)):
                     sock[0].sendall(test)
-        elif(command == 'blockchain'):
+        elif(command == 'bcadd'):
             op = commandList[1]
             bc.add(op)
             bc.writeToFile()
@@ -151,6 +151,7 @@ def main():
     global configData
     global serverPID
     global bc
+    global keyvalue
 
     if len(sys.argv) != 2:
         print(f'Usage: python {sys.argv[0]} <process_id>')
@@ -160,12 +161,9 @@ def main():
     configData = json.load(f)
     serverPID = sys.argv[1]
     bc = blockchain(serverPID)
-    # bc.print()
-    # bc.add("put alice 8435928285")
-    # bc.add("get alice")
-    # bc.add("put bob 8589452")
-    # bc.writeToFile()
+    keyvalue = bc.recreateKV()
 
+    print(keyvalue)
     # print(configData[clientPID])
 
     try:

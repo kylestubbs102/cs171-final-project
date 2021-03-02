@@ -55,6 +55,14 @@ class blockchain:
             self.blockchain = data.blockchain
             bc.close()
 
+    def recreateKV(self):
+        tempDict = {}
+        for block in self.blockchain:
+            blockOP = block[0].split(" ")
+            if(blockOP[0] == "put"):
+                tempDict[blockOP[1]] = blockOP[2]
+        return tempDict
+
     def print(self):
         for i in self.blockchain:
             print(i)
