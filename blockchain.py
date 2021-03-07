@@ -13,7 +13,7 @@ class blockchain:
 
     # input: operation as a string
     # adds operation block to blockchain
-    def add(self, op):
+    def mine(self, op):
         operation = str(op)
         hash = None
         nonce = None
@@ -38,8 +38,16 @@ class blockchain:
                 foundNonce = True
 
         # everything should be strings
+        print("operation:", operation)
+        print("nonnce:", nonce)
+        print("hash:", hash)
         block = (operation, nonce, hash)
+        return block
+
+    def add(self, block, index):
+        # need to account for if server missed out on an index?
         self.blockchain.append(block)
+        self.writeToFile()
 
     # writes blockchain to file
     def writeToFile(self):

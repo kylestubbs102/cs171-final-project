@@ -43,6 +43,13 @@ def userInput():
             for sock in servers:
                 if(sock[1] == str(pid)):
                     sock[0].sendall(test)
+        elif(command == 'sendleader'):
+            # example: sendleader 1
+            pid = commandList[1]
+            message = "leader"
+            for sock in servers:
+                if(sock[1] == str(pid)):
+                    sock[0].sendall(message.encode())
         elif(command == 'exit'):
             doExit()
 
