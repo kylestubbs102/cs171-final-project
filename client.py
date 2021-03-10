@@ -56,6 +56,8 @@ def userInput():
             for sock in servers:
                 if(sock[1] == str(pid)):
                     sock[0].sendall(message)
+        elif(command == 'hintedLeader'):
+            print(hintedLeader)
         elif(command == 'exit' or command == 'failProcess'):
             doExit()
 

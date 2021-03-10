@@ -263,19 +263,23 @@ def userInput():
             send = message(test, serverPID)
             send = pickle.dumps(send)
             for sock in otherServers:
-                sock[0].sendall(send)
+                if(sock[1] not in failedLinks):
+                    sock[0].sendall(send)
             for sock in otherClients:
-                sock[0].sendall(send)
+                if(sock[1] not in failedLinks):
+                    sock[0].sendall(send)
         elif(command == 'send'):
             pid = commandList[1]
             test = "testing individual from server " + str(serverPID)
             test = message(test, serverPID).getReadyToSend()
             for sock in otherServers:
-                if(sock[1] == str(pid)):
+                if(sock[1] == str(pid) and sock[1] not in failedLinks):
                     sock[0].sendall(test)
             for sock in otherClients:
-                if(sock[1] == str(pid)):
+                if(sock[1] == str(pid) and sock[1] not in failedLinks):
                     sock[0].sendall(test)
+        elif(command == 'hintedLeader'):
+            print(hintedLeader)
         elif(command == 'failLink'):
             # example: failLink 1 2
             if(commandList[1] == serverPID):
