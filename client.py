@@ -4,6 +4,8 @@ import threading
 import os
 import time
 import json
+import pickle
+from utility import message as m
 from datetime import datetime
 
 servers = []
@@ -11,6 +13,9 @@ serverListeners = []
 configData = None
 clientSock = None
 clientPID = None
+lock = threading.Lock()
+
+hintedLeader = None
 
 
 def doExit():
@@ -33,39 +38,47 @@ def userInput():
         if(command == 'connect'):
             threading.Thread(target=connectToServers).start()
         elif(command == 'sendall'):
+            test = "testing from client " + str(clientPID)
+            send = m(test, clientPID).getReadyToSend()
             for sock in servers:
-                test = "testing from client " + str(clientPID)
-                sock[0].sendall(test.encode())
+                sock[0].sendall(send)
         elif(command == 'send'):
             pid = commandList[1]
             test = "testing individual from client " + str(clientPID)
-            test = test.encode()
+            send = m(test, clientPID).getReadyToSend()
             for sock in servers:
                 if(sock[1] == str(pid)):
-                    sock[0].sendall(test)
+                    sock[0].sendall(send)
         elif(command == 'sendleader'):
             # example: sendleader 1
             pid = commandList[1]
-            message = "leader"
+            message = m("leader", clientPID).getReadyToSend()
             for sock in servers:
                 if(sock[1] == str(pid)):
-                    sock[0].sendall(message.encode())
-        elif(command == 'exit'):
+                    sock[0].sendall(message)
+        elif(command == 'exit' or command == 'failProcess'):
             doExit()
 
 
 def onNewServerConnection(serverSocket, addr):
+    global hintedLeader
     serverListeners.append(serverSocket)
     serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
     while True:
         try:
-            msg = serverSocket.recv(2048).decode()
+            msg = serverSocket.recv(2048)
         except socket.error:
             serverSocket.close()
         if not msg:
             serverSocket.close()
-        if (msg != ''):
-            print(msg)
+        if (msg != b''):
+            if(msg.command == 'hinted leader'):
+                lock.acquire()
+                hintedLeader = msg.senderPID
+                lock.release()
+            msg = pickle.loads(msg)
+            print(msg.command)
 
 
 def watch():
@@ -81,7 +94,7 @@ def watch():
 
 
 def connectToServers():
-    print("connect here")
+    print("connecting to servers")
     # connect to servers here, afterwards set up bind
     # put connections in array
     for i in range(1, 6):

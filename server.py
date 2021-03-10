@@ -4,19 +4,23 @@ import threading
 import os
 import time
 import json
+import pickle
+from utility import message
 from queue import Queue
 from blockchain import blockchain
 from datetime import datetime
 
-otherServers = []                 # array of [socket, id]
-serverSock = None
-serverPID = None                  # server's own PID from args
+otherServers = []                 # array of [socket, id(str)]
+serverSock = None                 # serverSocket
+serverPID = None                  # server's own PID from args(str)
 configData = None                 # json config data
 lock = threading.Lock()           # lock
-failedLinks = set()
-serverBind = None
+failedLinks = set()               # set containing failed links
 otherClients = []
 
+hintedLeader = None
+
+# delay for sending messages
 delay = 2
 
 # data structures
@@ -28,6 +32,195 @@ keyvalue = {}
 BallotNum = [0, 0, 0]      # order: <seq_num, pid, depth>
 AcceptNum = [0, 0, 0]
 AcceptVal = None
+myVal = None
+receivedPromises = []
+numReceivedPromises = 0
+
+
+def connectToServers():
+    global otherServers
+
+    for i in range(1, 6):
+        if(i != int(serverPID)):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.connect((socket.gethostname(), configData[str(i)]))
+            msg_send = 'server ' + serverPID
+            sock.sendall(msg_send.encode())
+            otherServers.append([sock, str(i)])
+
+
+def onNewServerConnection(serverSocket, addr):
+    global numReceivedPromises
+    global receivedPromises
+    global hintedLeader
+    # handle messages from other clients
+    print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
+    serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    while True:
+        try:
+            msg = serverSocket.recv(2048)
+        except socket.error:
+            serverSocket.close()
+        if not msg:
+            serverSocket.close()
+        if(msg != b''):
+            msg = pickle.loads(msg)
+            print(
+                f'{datetime.now().strftime("%H:%M:%S")} message from {addr}:', msg.command)
+
+            if(msg.command == 'leader'):
+                threading.Thread(target=handleLeaderCommand).start()
+
+            if(msg.command == 'hintedLeader'):
+                lock.acquire()
+                hintedLeader = msg.senderPID
+                lock.release()
+
+            if(msg.command == 'prepare'):
+                threading.Thread(target=handlePrepareCommand, args=(
+                    msg.BallotNum[0], msg.BallotNum[1], msg.BallotNum[2])).start()
+
+            if(msg.command == 'promise'):
+                lock.acquire()
+                numReceivedPromises += 1
+                receivedPromises.append(msg)
+
+                # handles the case of all four servers responding
+                # server will start two threads total (receives) ???? need to think more about
+                if(numReceivedPromises >= 3 and (hintedLeader == None or hintedLeader != serverPID)):
+                    threading.Thread(target=receiveMajorityPromises).start()
+                lock.release()
+
+    serverSocket.close()
+
+
+def receiveMajorityPromises():
+    global hintedLeader
+    global myVal
+    global AcceptVal
+    global AcceptNum
+    global BallotNum
+    global receivedPromises
+    global numReceivedPromises
+
+    # think about logic for setting myVal
+    for promise in receivedPromises:
+        # TO DO: COMPARSIONS
+        print(promise.val)
+
+    hintedLeader = serverPID
+    numReceivedPromises = 0
+
+    msg = message("hintedLeader", serverPID).getReadyToSend()
+    time.sleep(delay)
+    for sock in otherServers:
+        if(sock[1] not in failedLinks):
+            sock[0].sendall(msg)
+    for sock in otherClients:
+        sock[0].sendall(msg)
+
+    # start Phase 2 if myVal != None
+    # start a thread
+    if(myVal != None):
+        print("start phase 2")
+
+
+def handlePrepareCommand(seqNum, pid, depth):
+    global BallotNum
+    global AcceptNum
+    global AcceptVal
+
+    seqNum = int(seqNum)
+    pid = int(pid)
+    depth = int(depth)
+    if seqNum >= BallotNum[0] and depth >= BallotNum[2]:
+        send = True
+        if(seqNum == BallotNum[0] and (int(BallotNum[0]) > int(pid))):
+            send = False
+        if(send):
+            time.sleep(delay)
+            for sock in otherServers:
+                if(int(sock[1]) == int(pid) and (int(pid) not in failedLinks)):
+                    lock.acquire()
+                    promise = "promise"
+                    promise = message(promise, serverPID)
+                    promise.BallotNum = BallotNum
+                    promise.AcceptNum = AcceptNum
+                    promise.AcceptVal = AcceptVal
+                    sock[0].sendall(promise.getReadyToSend())
+                    lock.release()
+
+
+def handleLeaderCommand():
+    global BallotNum
+    global lock
+    lock.acquire()
+    BallotNum[0] += 1
+    lock.release()
+
+    time.sleep(delay)
+    for sock in otherServers:
+        # sock [socket, pid]
+        if(sock[1] not in failedLinks):
+            prepare = message("prepare", serverPID)
+            prepare.BallotNum = BallotNum
+
+            sock[0].sendall(prepare.getReadyToSend())
+
+
+def connectToClients():
+    global otherClients
+
+    for i in range(6, 9):
+        if(i != int(serverPID)):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.connect((socket.gethostname(), configData[str(i)]))
+            msg_send = 'server ' + serverPID
+            msg_send = message(msg_send, serverPID).getReadyToSend()
+            sock.sendall(msg_send)
+            otherClients.append([sock, str(i)])
+
+
+def onNewClientConnection(clientSocket, addr, pid):
+    global otherClients
+    print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
+    clientSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    while True:
+        try:
+            msg = clientSocket.recv(2048)
+        except socket.error:
+            clientSocket.close()
+        if not msg:
+            clientSocket.close()
+        if (msg != b''):
+            # Three scenarios for operation receives
+            # 1. receive op and no hinted leader (try to become leader)
+            # 2. receive op and am hinted leader (start from phase 2)
+            # 3. receive op and am not hinted leader (forward to hinted leader with timeout)
+            msg = pickle.loads(msg)
+            if(msg.command == 'leader'):
+                threading.Thread(target=handleLeaderCommand).start()
+            print(msg.command)
+
+
+def watch():
+    global serverSock
+    serverSock = socket.socket()
+    serverSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    serverSock.bind((socket.gethostname(), configData[sys.argv[1]]))
+    serverSock.listen(32)
+    while True:
+        c, addr = serverSock.accept()
+        msg_recv = c.recv(2048).decode()
+        msgs = msg_recv.split()
+        if 'server' in msg_recv:
+            threading.Thread(target=onNewServerConnection,
+                             args=(c, addr)).start()
+        else:
+            threading.Thread(target=onNewClientConnection,
+                             args=(c, addr, msgs[1])).start()
 
 
 def doExit():
@@ -53,15 +246,16 @@ def userInput():
             threading.Thread(target=connectToClients).start()
         elif(command == 'sendall'):
             test = "testing from server " + str(serverPID)
-            test = test.encode()
+            send = message(test, serverPID)
+            send = pickle.dumps(send)
             for sock in otherServers:
-                sock[0].sendall(test)
+                sock[0].sendall(send)
             for sock in otherClients:
-                sock[0].sendall(test)
+                sock[0].sendall(send)
         elif(command == 'send'):
             pid = commandList[1]
             test = "testing individual from server " + str(serverPID)
-            test = test.encode()
+            test = message(test, serverPID).getReadyToSend()
             for sock in otherServers:
                 if(sock[1] == str(pid)):
                     sock[0].sendall(test)
@@ -70,142 +264,27 @@ def userInput():
                     sock[0].sendall(test)
         elif(command == 'failLink'):
             # example: failLink 1 2
-            failedLinks.add(commandList[2])
+            if(commandList[1] == serverPID):
+                failedLinks.add(commandList[2])
+                print("failedLinks:", failedLinks)
+            else:
+                print("please enter valid source for server {s}".format(
+                    s=serverPID))
         elif(command == 'fixLink'):
             # example: fixLink 1 2
-            failedLinks.remove(commandList[2])
+            if(commandList[1] == serverPID):
+                failedLinks.remove(commandList[2])
+            else:
+                print("please enter valid source for server {s}".format(
+                    s=serverPID))
         elif(command == 'printBlockchain'):
             bc.print()
         elif(command == 'printKVStore'):
             print(keyvalue)
         elif(command == 'printQueue'):
             print(queue)
-        elif(command == 'failProcess'):
+        elif(command == 'failProcess' or command == 'exit'):
             doExit()
-
-
-def connectToServers():
-    global otherServers
-
-    for i in range(1, 6):
-        if(i != int(serverPID)):
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.connect((socket.gethostname(), configData[str(i)]))
-            msg_send = 'server ' + serverPID
-            sock.sendall(msg_send.encode())
-            otherServers.append([sock, str(i)])
-
-
-def onNewServerConnection(serverSocket, addr):
-    # handle messages from other clients
-    print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
-    serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    while True:
-        try:
-            msg = serverSocket.recv(64).decode()
-        except socket.error:
-            serverSocket.close()
-        if not msg:
-            serverSocket.close()
-        if(msg != ''):
-            print(f'{datetime.now().strftime("%H:%M:%S")} message from {addr}:', msg)
-            if(msg == 'leader'):
-                threading.Thread(target=handleLeaderCommand).start()
-
-            command = msg.split(" ")
-            if(command[0] == 'prepare'):
-                threading.Thread(target=handlePrepareCommand, args=(
-                    command[1], command[2], command[3])).start()
-
-    serverSocket.close()
-
-
-def connectToClients():
-    global otherClients
-
-    for i in range(6, 9):
-        if(i != int(serverPID)):
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.connect((socket.gethostname(), configData[str(i)]))
-            msg_send = 'server ' + serverPID
-            sock.sendall(msg_send.encode())
-            otherClients.append([sock, str(i)])
-
-
-def onNewClientConnection(clientSocket, addr, pid):
-    global otherClients
-    print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
-    clientSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    while True:
-        try:
-            msg = clientSocket.recv(2048).decode()
-        except socket.error:
-            clientSocket.close()
-        if not msg:
-            clientSocket.close()
-        if (msg != ''):
-            if(msg == 'leader'):
-                threading.Thread(target=handleLeaderCommand).start()
-            print(msg)
-
-
-def handlePrepareCommand(seqNum, pid, depth):
-    global BallotNum
-    global AcceptNum
-    global AcceptVal
-
-    seqNum = int(seqNum)
-    pid = int(pid)
-    depth = int(depth)
-    if seqNum >= BallotNum[0] and depth >= BallotNum[2]:
-        send = True
-        if(seqNum == BallotNum[0] and (int(BallotNum[0]) > int(pid))):
-            send = False
-        if(send):
-            time.sleep(delay)
-            for sock in otherServers:
-                if(int(sock[1]) == int(pid) and (int(pid) not in failedLinks)):
-                    promise = "promise "
-                    # TEMP CODE
-                    promise += str(serverPID)
-                    # promise.join(BallotNum)
-                    # promise.join(AcceptNum)
-                    # promise.join(AcceptVal)
-                    sock[0].sendall(promise.encode())
-
-
-def handleLeaderCommand():
-    global BallotNum
-    BallotNum[0] += 1
-
-    time.sleep(delay)
-    for sock in otherServers:
-        # sock [socket, pid]
-        if(sock[1] not in failedLinks):
-            promise = "prepare {seq} {pid} {depth}".format(
-                seq=BallotNum[0], pid=BallotNum[1], depth=BallotNum[2])
-
-            sock[0].sendall(promise.encode())
-
-
-def watch():
-    global serverSock
-    serverSock = socket.socket()
-    serverSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    serverSock.bind((socket.gethostname(), configData[sys.argv[1]]))
-    serverSock.listen(32)
-    while True:
-        c, addr = serverSock.accept()
-        msg_recv = c.recv(2048).decode()
-        msgs = msg_recv.split()
-        if 'server' in msg_recv:
-            threading.Thread(target=onNewServerConnection,
-                             args=(c, addr)).start()
-        else:
-            threading.Thread(target=onNewClientConnection,
-                             args=(c, addr, msgs[1])).start()
 
 
 def main():
