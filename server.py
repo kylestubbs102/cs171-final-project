@@ -5,7 +5,7 @@ import os
 import time
 import json
 import pickle
-from utility import message
+from utility import message, compareBallots
 from queue import Queue
 from blockchain import blockchain
 from datetime import datetime
@@ -25,7 +25,7 @@ delay = 2
 
 # data structures
 bc = None
-queue = Queue()
+OPqueue = Queue()
 keyvalue = {}
 
 # paxos variables
@@ -104,10 +104,22 @@ def receiveMajorityPromises():
     global receivedPromises
     global numReceivedPromises
 
+    notAllBottom = False
     # think about logic for setting myVal
     for promise in receivedPromises:
-        # TO DO: COMPARSIONS
-        print(promise.val)
+        if promise.AcceptVal != None:
+            notAllBottom = True
+    if(notAllBottom):
+        highestBallotMsg = receivedPromises[0]
+        for promise in receivedPromises:
+            if(compareBallots(promise.AcceptNum, highestBallotMsg.AcceptNum)):
+                highestBallotMsg = promise
+        AcceptNum = highestBallotMsg.AcceptNum
+        myVal = highestBallotMsg.AcceptVal
+    else:
+        AcceptNum = BallotNum
+        # compare ballots function
+        # keep trying
 
     hintedLeader = serverPID
     numReceivedPromises = 0
@@ -122,8 +134,10 @@ def receiveMajorityPromises():
 
     # start Phase 2 if myVal != None
     # start a thread
-    if(myVal != None):
+    if(myVal != None or not OPqueue.empty()):
         print("start phase 2")
+        # phase 2 will either start with popping an operation from queue and mining it
+        # or use a val gained here
 
 
 def handlePrepareCommand(seqNum, pid, depth):
@@ -279,10 +293,10 @@ def userInput():
                     s=serverPID))
         elif(command == 'printBlockchain'):
             bc.print()
-        elif(command == 'printKVStore'):
+        elif(command == 'printKVStore' or command == 'kv'):
             print(keyvalue)
-        elif(command == 'printQueue'):
-            print(queue)
+        elif(command == 'printQueue' or command == 'q'):
+            print(OPqueue)
         elif(command == 'failProcess' or command == 'exit'):
             doExit()
 

@@ -73,11 +73,11 @@ def onNewServerConnection(serverSocket, addr):
         if not msg:
             serverSocket.close()
         if (msg != b''):
-            if(msg.command == 'hinted leader'):
+            msg = pickle.loads(msg)
+            if(msg.command == 'hintedLeader'):
                 lock.acquire()
                 hintedLeader = msg.senderPID
                 lock.release()
-            msg = pickle.loads(msg)
             print(msg.command)
 
 
