@@ -34,7 +34,9 @@ AcceptNum = [0, 0, 0]
 AcceptVal = None
 myVal = None
 receivedPromises = []
+receivedAccepted = []
 numReceivedPromises = 0
+numReceivedAccepted = 0
 
 
 def connectToServers():
@@ -52,7 +54,9 @@ def connectToServers():
 
 def onNewServerConnection(serverSocket, addr):
     global numReceivedPromises
+    global numReceivedAccepted
     global receivedPromises
+    global receivedAccepted
     global hintedLeader
     # handle messages from other clients
     print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
@@ -68,6 +72,23 @@ def onNewServerConnection(serverSocket, addr):
             msg = pickle.loads(msg)
             print(
                 f'{datetime.now().strftime("%H:%M:%S")} message from {addr}:', msg.command)
+
+            if(msg.command == 'accept'):
+                threading.Thread(target=handleAcceptCommand, args=(
+                    msg.BallotNum, msg.val)).start()
+
+            if(msg.command == 'accepted'):
+                lock.acquire()
+                numReceivedAccepted += 1
+                receivedAccepted.append(msg)
+
+                if(numReceivedAccepted >= 2):
+                    threading.Thread(target=receiveMajorityAccepted).start()
+                lock.release()
+
+            if(msg.command == 'decide' and msg.senderPID == hintedLeader):
+                threading.Thread(target=handleDecideCommand, args=(
+                    msg.val)).start()
 
             if(msg.command == 'leader'):
                 threading.Thread(target=handleLeaderCommand).start()
@@ -88,7 +109,7 @@ def onNewServerConnection(serverSocket, addr):
 
                 # handles the case of all four servers responding
                 # server will start two threads total (receives) ???? need to think more about
-                if(numReceivedPromises >= 3 and (hintedLeader == None or hintedLeader != serverPID)):
+                if(numReceivedPromises >= 2 and (hintedLeader == None or hintedLeader != serverPID)):
                     threading.Thread(target=receiveMajorityPromises).start()
                 lock.release()
 
@@ -136,8 +157,62 @@ def receiveMajorityPromises():
     # start a thread
     if(myVal != None or not OPqueue.empty()):
         print("start phase 2")
+        threading.Thread(target=sendAcceptMessages).start()
         # phase 2 will either start with popping an operation from queue and mining it
         # or use a val gained here
+
+
+def receiveMajorityAccepted():
+    global numReceivedAccepted
+
+    numReceivedAccepted = 0
+    msg = message("decide", serverPID)
+    msg.val = myVal
+    msg.BallotNum = BallotNum
+    time.sleep(delay)
+    for sock in otherServers:
+        if(sock[1] not in failedLinks):
+            sock[0].sendall(msg.getReadyToSend())
+
+
+def sendAcceptMessages():
+    global myVal
+    if myVal == None:
+        myVal = OPqueue.get()
+        myVal = bc.mine(myVal)
+    msg = message("accept", serverPID)
+    msg.val = myVal
+    msg.BallotNum = BallotNum
+    time.sleep(delay)
+    for sock in otherServers:
+        if(sock[1] not in failedLinks):
+            sock[0].sendall(msg.getReadyToSend())
+
+
+def handleDecideCommand(newVal):
+    global myVal
+    global bc
+    global keyvalue
+    myVal = newVal
+    bc.add(myVal)
+    keyvalue = bc.recreateKV()
+
+
+def handleAcceptCommand(newBallotNum, newVal):
+    global BallotNum
+    global AcceptVal
+    global AcceptNum
+    if (compareBallots(newBallotNum, BallotNum)):
+        AcceptNum = newBallotNum
+        AcceptVal = newVal
+        for sock in otherServers:
+            if sock[1] not in failedLinks and sock[1] == hintedLeader:
+                msg = message("accepted", serverPID)
+                msg.val = AcceptVal
+                msg.BallotNum = BallotNum
+                time.sleep(delay)
+                sock[0].sendall(msg.getReadyToSend())
+                break
 
 
 def handlePrepareCommand(seqNum, pid, depth):
@@ -244,6 +319,8 @@ def doExit():
     sys.stdout.flush()
     serverSock.close()
     for sock in otherServers:
+        sock[0].close()
+    for sock in otherClients:
         sock[0].close()
     os._exit(1)
 

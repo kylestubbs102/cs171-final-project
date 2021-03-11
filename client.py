@@ -60,6 +60,12 @@ def userInput():
             print(hintedLeader)
         elif(command == 'exit' or command == 'failProcess'):
             doExit()
+        elif(command == 'put' or command == 'get'):
+            msg = m(x, clientPID)
+            for sock in servers:
+                if sock[1] == hintedLeader:
+                    sock[0].sendall(msg.getReadyToSend())
+        # elif(command == 'get'):
 
 
 def onNewServerConnection(serverSocket, addr):
