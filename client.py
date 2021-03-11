@@ -61,7 +61,7 @@ def userInput():
         elif(command == 'exit' or command == 'failProcess'):
             doExit()
         elif(command == 'put' or command == 'get'):
-            msg = m(x, clientPID)
+            msg = m(command, clientPID, x)
             for sock in servers:
                 if sock[1] == hintedLeader:
                     sock[0].sendall(msg.getReadyToSend())

@@ -20,6 +20,8 @@ otherClients = []
 
 hintedLeader = None
 
+alreadySentAccepted = False
+
 # delay for sending messages
 delay = 2
 
@@ -82,13 +84,15 @@ def onNewServerConnection(serverSocket, addr):
                 numReceivedAccepted += 1
                 receivedAccepted.append(msg)
 
-                if(numReceivedAccepted >= 2):
+                if(numReceivedAccepted >= 2 and not alreadySentAccepted):
                     threading.Thread(target=receiveMajorityAccepted).start()
                 lock.release()
 
             if(msg.command == 'decide' and msg.senderPID == hintedLeader):
+                print(msg.val)
+                print(type(msg.val))
                 threading.Thread(target=handleDecideCommand, args=(
-                    msg.val)).start()
+                    msg.BallotNum, msg.val)).start()
 
             if(msg.command == 'leader'):
                 threading.Thread(target=handleLeaderCommand).start()
@@ -164,12 +168,23 @@ def receiveMajorityPromises():
 
 def receiveMajorityAccepted():
     global numReceivedAccepted
+    global bc
+    global keyvalue
+    global alreadySentAccepted
 
     numReceivedAccepted = 0
     msg = message("decide", serverPID)
     msg.val = myVal
     msg.BallotNum = BallotNum
+    alreadySentAccepted = True
+
+    # Add block to block chain
+    # update KV store
+    bc.add(myVal, BallotNum[2])
+    keyvalue = bc.recreateKV()
+
     time.sleep(delay)
+
     for sock in otherServers:
         if(sock[1] not in failedLinks):
             sock[0].sendall(msg.getReadyToSend())
@@ -189,12 +204,12 @@ def sendAcceptMessages():
             sock[0].sendall(msg.getReadyToSend())
 
 
-def handleDecideCommand(newVal):
+def handleDecideCommand(newBallotNum, newVal):
     global myVal
     global bc
     global keyvalue
     myVal = newVal
-    bc.add(myVal)
+    bc.add(myVal, newBallotNum[2])
     keyvalue = bc.recreateKV()
 
 
@@ -274,6 +289,7 @@ def connectToClients():
 
 def onNewClientConnection(clientSocket, addr, pid):
     global otherClients
+    global OPqueue
     print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
     clientSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     while True:
@@ -289,6 +305,9 @@ def onNewClientConnection(clientSocket, addr, pid):
             # 2. receive op and am hinted leader (start from phase 2)
             # 3. receive op and am not hinted leader (forward to hinted leader with timeout)
             msg = pickle.loads(msg)
+            if((msg.command == 'get' or msg.command == 'put') and hintedLeader == serverPID):
+                OPqueue.put(msg.other)
+                threading.Thread(target=sendAcceptMessages).start()
             if(msg.command == 'leader'):
                 threading.Thread(target=handleLeaderCommand).start()
             print(msg.command)
@@ -372,7 +391,7 @@ def userInput():
             else:
                 print("please enter valid source for server {s}".format(
                     s=serverPID))
-        elif(command == 'printBlockchain'):
+        elif(command == 'printBlockchain' or command == 'bc'):
             bc.print()
         elif(command == 'printKVStore' or command == 'kv'):
             print(keyvalue)
