@@ -5,6 +5,7 @@ import os
 import time
 import json
 import pickle
+import random
 from utility import message as m
 from datetime import datetime
 
@@ -62,9 +63,15 @@ def userInput():
             doExit()
         elif(command == 'put' or command == 'get'):
             msg = m(command, clientPID, x)
-            for sock in servers:
-                if sock[1] == hintedLeader:
-                    sock[0].sendall(msg.getReadyToSend())
+            if(hintedLeader == None):
+                selectedServer = str(random.randint(1, 5))
+                for sock in servers:
+                    if sock[1] == selectedServer:
+                        sock[0].sendall(msg.getReadyToSend())
+            else:
+                for sock in servers:
+                    if sock[1] == hintedLeader:
+                        sock[0].sendall(msg.getReadyToSend())
         # elif(command == 'get'):
 
 

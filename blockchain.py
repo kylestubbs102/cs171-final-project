@@ -46,7 +46,12 @@ class blockchain:
 
     def add(self, block, index):
         # need to account for if server missed out on an index?
-        self.blockchain.append(block)
+        if(index >= len(self.blockchain)):
+            print("NEED TO ACCOUNT FOR THIS ERROR in blockchain.py")
+            self.blockchain.append(block)
+        else:
+            self.blockchain[index] = block
+
         self.writeToFile()
 
     # writes blockchain to file
@@ -65,6 +70,7 @@ class blockchain:
 
     def recreateKV(self):
         tempDict = {}
+
         for block in self.blockchain:
             blockOP = block[0].split(" ")
             if(blockOP[0] == "put"):

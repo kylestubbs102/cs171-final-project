@@ -20,8 +20,6 @@ otherClients = []
 
 hintedLeader = None
 
-alreadySentAccepted = False
-
 # delay for sending messages
 delay = 2
 
@@ -39,6 +37,8 @@ receivedPromises = []
 receivedAccepted = []
 numReceivedPromises = 0
 numReceivedAccepted = 0
+requestingClient = None
+alreadySentAccepted = False
 
 
 def connectToServers():
@@ -89,8 +89,6 @@ def onNewServerConnection(serverSocket, addr):
                 lock.release()
 
             if(msg.command == 'decide' and msg.senderPID == hintedLeader):
-                print(msg.val)
-                print(type(msg.val))
                 threading.Thread(target=handleDecideCommand, args=(
                     msg.BallotNum, msg.val)).start()
 
@@ -160,7 +158,6 @@ def receiveMajorityPromises():
     # start Phase 2 if myVal != None
     # start a thread
     if(myVal != None or not OPqueue.empty()):
-        print("start phase 2")
         threading.Thread(target=sendAcceptMessages).start()
         # phase 2 will either start with popping an operation from queue and mining it
         # or use a val gained here
@@ -171,6 +168,7 @@ def receiveMajorityAccepted():
     global bc
     global keyvalue
     global alreadySentAccepted
+    global requestingClient
 
     numReceivedAccepted = 0
     msg = message("decide", serverPID)
@@ -183,18 +181,33 @@ def receiveMajorityAccepted():
     bc.add(myVal, BallotNum[2])
     keyvalue = bc.recreateKV()
 
+    # Reset paxos vars
+    resetPaxosVars()
+    print("paxos vars reset")
     time.sleep(delay)
 
     for sock in otherServers:
         if(sock[1] not in failedLinks):
             sock[0].sendall(msg.getReadyToSend())
 
+    for sock in otherClients:
+        if(sock[1] == requestingClient):
+            msg = message("ack", serverPID)
+            sock[0].sendall(msg.getReadyToSend())
+
+    # restart paxos if more operations in queue
+    if(not OPqueue.empty() and myVal == None):
+        print("restart paxos from phase 2")
+        sendAcceptMessages()
+
 
 def sendAcceptMessages():
     global myVal
+    global requestingClient
     if myVal == None:
-        myVal = OPqueue.get()
-        myVal = bc.mine(myVal)
+        op = OPqueue.get()
+        requestingClient = op[1]
+        myVal = bc.mine(op[0])
     msg = message("accept", serverPID)
     msg.val = myVal
     msg.BallotNum = BallotNum
@@ -210,6 +223,10 @@ def handleDecideCommand(newBallotNum, newVal):
     global keyvalue
     myVal = newVal
     bc.add(myVal, newBallotNum[2])
+
+    # reset paxos vars
+    resetPaxosVars()
+
     keyvalue = bc.recreateKV()
 
 
@@ -217,6 +234,9 @@ def handleAcceptCommand(newBallotNum, newVal):
     global BallotNum
     global AcceptVal
     global AcceptNum
+
+    print("newBallotNum", newBallotNum)
+    print("BallotNum", BallotNum)
     if (compareBallots(newBallotNum, BallotNum)):
         AcceptNum = newBallotNum
         AcceptVal = newVal
@@ -273,6 +293,30 @@ def handleLeaderCommand():
             sock[0].sendall(prepare.getReadyToSend())
 
 
+def resetPaxosVars():
+    global BallotNum
+    BallotNum[2] = BallotNum[2] + 1
+    BallotNum[0] = 0
+    global AcceptNum
+    AcceptNum = [0, 0, 0]
+    global AcceptVal
+    AcceptVal = None
+    global myVal
+    myVal = None
+    global receivedPromises
+    receivedPromises = []
+    global receivedAccepted
+    receivedAccepted = []
+    global numReceivedPromises
+    numReceivedPromises = 0
+    global numReceivedAccepted
+    numReceivedAccepted = 0
+    global alreadySentAccepted
+    alreadySentAccepted = False
+
+    print("BallotNum is reset to ", BallotNum)
+
+
 def connectToClients():
     global otherClients
 
@@ -305,9 +349,18 @@ def onNewClientConnection(clientSocket, addr, pid):
             # 2. receive op and am hinted leader (start from phase 2)
             # 3. receive op and am not hinted leader (forward to hinted leader with timeout)
             msg = pickle.loads(msg)
+            if((msg.command == 'get' or msg.command == 'put') and hintedLeader == None):
+                OPqueue.put([msg.other, msg.senderPID])
+                threading.Thread(target=handleLeaderCommand).start()
+            if((msg.command == 'get' or msg.command == 'put') and hintedLeader != serverPID):
+                # NEED A TIMEOUT HERE
+                for sock in otherServers:
+                    if(sock[1] == hintedLeader and sock[1] not in failedLinks):
+                        sock[0].sendall(msg.getReadyToSend())
             if((msg.command == 'get' or msg.command == 'put') and hintedLeader == serverPID):
-                OPqueue.put(msg.other)
-                threading.Thread(target=sendAcceptMessages).start()
+                OPqueue.put([msg.other, msg.senderPID])
+                if(myVal == None):
+                    threading.Thread(target=sendAcceptMessages).start()
             if(msg.command == 'leader'):
                 threading.Thread(target=handleLeaderCommand).start()
             print(msg.command)
@@ -396,7 +449,7 @@ def userInput():
         elif(command == 'printKVStore' or command == 'kv'):
             print(keyvalue)
         elif(command == 'printQueue' or command == 'q'):
-            print(OPqueue)
+            print(OPqueue.queue)
         elif(command == 'failProcess' or command == 'exit'):
             doExit()
 
