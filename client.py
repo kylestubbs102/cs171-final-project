@@ -118,7 +118,6 @@ def connectToServers():
         msg = 'client ' + str(clientPID)
         sock.sendall(msg.encode())
         servers.append([sock, str(i)])
-        # threading.Thread(target=watch).start()
 
 
 def main():
@@ -130,11 +129,6 @@ def main():
     f.close()
 
     clientPID = sys.argv[1]
-
-    # clientSock
-    # initialize clientSock to a connecting socket
-    # clientSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # clientSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
     try:
         threading.Thread(target=userInput).start()

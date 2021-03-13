@@ -102,7 +102,7 @@ def onNewServerConnection(serverSocket, addr):
 
             if(msg.command == 'prepare'):
                 threading.Thread(target=handlePrepareCommand, args=(
-                    msg.BallotNum[0], msg.BallotNum[1], msg.BallotNum[2])).start()
+                    msg.BallotNum,)).start()
 
             if(msg.command == 'promise'):
                 lock.acquire()
@@ -163,6 +163,16 @@ def receiveMajorityPromises():
         # or use a val gained here
 
 
+def broadcastToOtherServers(msg):
+    global otherServers
+    for sock in otherServers:
+        if(sock[1] not in failedLinks):
+            try:
+                sock[0].sendall(msg)
+            except socket.error:
+                sock[0].close()
+
+
 def receiveMajorityAccepted():
     global numReceivedAccepted
     global bc
@@ -180,20 +190,27 @@ def receiveMajorityAccepted():
     # update KV store
     bc.add(myVal, BallotNum[2])
     keyvalue = bc.recreateKV()
+    operation = myVal[0].split(" ")
+    opCommand = operation[0]
 
     # Reset paxos vars
     resetPaxosVars()
     print("paxos vars reset")
     time.sleep(delay)
 
-    for sock in otherServers:
-        if(sock[1] not in failedLinks):
-            sock[0].sendall(msg.getReadyToSend())
+    broadcastToOtherServers(msg.getReadyToSend())
 
     for sock in otherClients:
         if(sock[1] == requestingClient):
             msg = message("ack", serverPID)
             sock[0].sendall(msg.getReadyToSend())
+            infoMsg = message("info", serverPID)
+            if(opCommand == "get" and operation[1] in keyvalue.keys()):
+                infoMsg.val = keyvalue[operation[1]]
+                sock[0].sendall(infoMsg.getReadyToSend())
+            else:
+                infoMsg.val = "key not found"
+                sock[0].sendall(infoMsg.getReadyToSend())
 
     # restart paxos if more operations in queue
     if(not OPqueue.empty() and myVal == None):
@@ -212,9 +229,7 @@ def sendAcceptMessages():
     msg.val = myVal
     msg.BallotNum = BallotNum
     time.sleep(delay)
-    for sock in otherServers:
-        if(sock[1] not in failedLinks):
-            sock[0].sendall(msg.getReadyToSend())
+    broadcastToOtherServers(msg.getReadyToSend())
 
 
 def handleDecideCommand(newBallotNum, newVal):
@@ -246,51 +261,47 @@ def handleAcceptCommand(newBallotNum, newVal):
                 msg.val = AcceptVal
                 msg.BallotNum = BallotNum
                 time.sleep(delay)
-                sock[0].sendall(msg.getReadyToSend())
+                try:
+                    sock[0].sendall(msg.getReadyToSend())
+                except:
+                    sock[0].close()
                 break
 
 
-def handlePrepareCommand(seqNum, pid, depth):
+def handlePrepareCommand(recBallot):
     global BallotNum
     global AcceptNum
     global AcceptVal
 
-    seqNum = int(seqNum)
-    pid = int(pid)
-    depth = int(depth)
-    if seqNum >= BallotNum[0] and depth >= BallotNum[2]:
-        send = True
-        if(seqNum == BallotNum[0] and (int(BallotNum[0]) > int(pid))):
-            send = False
-        if(send):
-            time.sleep(delay)
-            for sock in otherServers:
-                if(int(sock[1]) == int(pid) and (int(pid) not in failedLinks)):
-                    lock.acquire()
-                    promise = "promise"
-                    promise = message(promise, serverPID)
-                    promise.BallotNum = BallotNum
-                    promise.AcceptNum = AcceptNum
-                    promise.AcceptVal = AcceptVal
+    if(compareBallots(recBallot, BallotNum)):
+        time.sleep(delay)
+        for sock in otherServers:
+            if((int(sock[1]) == int(recBallot[1])) and (str(recBallot[1]) not in failedLinks)):
+                lock.acquire()
+                promise = "promise"
+                promise = message(promise, serverPID)
+                promise.BallotNum = BallotNum
+                promise.AcceptNum = AcceptNum
+                promise.AcceptVal = AcceptVal
+                try:
                     sock[0].sendall(promise.getReadyToSend())
-                    lock.release()
+                except socket.error:
+                    sock[0].close()
+                lock.release()
 
 
 def handleLeaderCommand():
     global BallotNum
     global lock
     lock.acquire()
-    BallotNum[0] += 1
+    BallotNum[0] += AcceptNum[0] + 1
     lock.release()
 
     time.sleep(delay)
-    for sock in otherServers:
-        # sock [socket, pid]
-        if(sock[1] not in failedLinks):
-            prepare = message("prepare", serverPID)
-            prepare.BallotNum = BallotNum
+    prepare = message("prepare", serverPID)
+    prepare.BallotNum = BallotNum
 
-            sock[0].sendall(prepare.getReadyToSend())
+    broadcastToOtherServers(prepare.getReadyToSend())
 
 
 def resetPaxosVars():
@@ -409,21 +420,24 @@ def userInput():
             threading.Thread(target=connectToClients).start()
         elif(command == 'sendall'):
             test = "testing from server " + str(serverPID)
-            send = message(test, serverPID)
-            send = pickle.dumps(send)
-            for sock in otherServers:
-                if(sock[1] not in failedLinks):
-                    sock[0].sendall(send)
+            send = message(test, serverPID).getReadyToSend()
+            broadcastToOtherServers(send)
             for sock in otherClients:
                 if(sock[1] not in failedLinks):
-                    sock[0].sendall(send)
+                    try:
+                        sock[0].sendall(send)
+                    except socket.error:
+                        sock[0].close()
         elif(command == 'send'):
             pid = commandList[1]
             test = "testing individual from server " + str(serverPID)
             test = message(test, serverPID).getReadyToSend()
             for sock in otherServers:
                 if(sock[1] == str(pid) and sock[1] not in failedLinks):
-                    sock[0].sendall(test)
+                    try:
+                        sock[0].sendall(test)
+                    except socket.error:
+                        sock[0].close()
             for sock in otherClients:
                 if(sock[1] == str(pid) and sock[1] not in failedLinks):
                     sock[0].sendall(test)

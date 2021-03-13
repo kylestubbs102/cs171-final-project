@@ -46,11 +46,7 @@ class blockchain:
 
     def add(self, block, index):
         # need to account for if server missed out on an index?
-        if(index >= len(self.blockchain)):
-            print("NEED TO ACCOUNT FOR THIS ERROR in blockchain.py")
-            self.blockchain.append(block)
-        else:
-            self.blockchain[index] = block
+        self.blockchain.append(block)
 
         self.writeToFile()
 
