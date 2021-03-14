@@ -88,7 +88,10 @@ def onPutOrGetCommand(msg, serversTried):
     else:
         for sock in servers:
             if sock[1] == hintedLeader:
-                sock[0].sendall(msg.getReadyToSend())
+                try:
+                    sock[0].sendall(msg.getReadyToSend())
+                except socket.error:
+                    sock[0].close()
     time.sleep(15)
     print("receivedACK:", receiveACK)
     if not receiveACK:

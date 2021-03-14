@@ -81,7 +81,8 @@ def onNewServerConnection(serverSocket, addr):
             if((msg.command == 'get' or msg.command == 'put') and hintedLeader == serverPID):
                 OPqueue.put([msg.other, msg.senderPID, msg.val])
                 if(myVal == None):
-                    threading.Thread(target=sendAcceptMessages).start()
+                    threading.Thread(target=sendAcceptMessages,
+                                     args=(True,)).start()
 
             if(msg.command == 'accept'):
                 threading.Thread(target=handleAcceptCommand, args=(
@@ -160,12 +161,7 @@ def receiveMajorityPromises():
 
     msg = message("hintedLeader", serverPID).getReadyToSend()
     time.sleep(delay)
-    for sock in otherServers:
-        if(sock[1] not in failedLinks):
-            try:
-                sock[0].sendall(msg)
-            except socket.error:
-                sock[0].close()
+    broadcastToOtherServers(msg)
     for sock in otherClients:
         try:
             sock[0].sendall(msg)
@@ -175,7 +171,7 @@ def receiveMajorityPromises():
     # start Phase 2 if myVal != None
     # start a thread
     if(myVal != None or not OPqueue.empty()):
-        threading.Thread(target=sendAcceptMessages).start()
+        threading.Thread(target=sendAcceptMessages, args=(False,)).start()
         # phase 2 will either start with popping an operation from queue and mining it
         # or use a val gained here
 
@@ -223,14 +219,23 @@ def receiveMajorityAccepted():
     msg = message("ack", serverPID)
     for sock in otherClients:
         if(sock[1] == requestingClient):
-            sock[0].sendall(msg.getReadyToSend())
+            try:
+                sock[0].sendall(msg.getReadyToSend())
+            except socket.error:
+                sock[0].close()
             infoMsg = message("info", serverPID)
             if(opCommand == "get" and operation[1] in keyvalue.keys()):
                 infoMsg.val = keyvalue[operation[1]]
-                sock[0].sendall(infoMsg.getReadyToSend())
+                try:
+                    sock[0].sendall(infoMsg.getReadyToSend())
+                except socket.error:
+                    sock[0].close()
             elif(opCommand == "get" and operation[1] not in keyvalue.keys()):
                 infoMsg.val = "key not found"
-                sock[0].sendall(infoMsg.getReadyToSend())
+                try:
+                    sock[0].sendall(infoMsg.getReadyToSend())
+                except socket.error:
+                    sock[0].close()
 
     for sock in otherServers:
         if(sock[1] == requestingServer):
@@ -244,14 +249,17 @@ def receiveMajorityAccepted():
     # restart paxos if more operations in queue
     if(not OPqueue.empty() and myVal == None):
         print("restart paxos from phase 2")
-        sendAcceptMessages()
+        sendAcceptMessages(True)
 
 
-def sendAcceptMessages():
+def sendAcceptMessages(startFromPhaseTwo):
+    global BallotNum
     global myVal
     global requestingClient
     global requestingServer
 
+    if startFromPhaseTwo:
+        BallotNum[0] += 1
     if myVal == None:
         op = OPqueue.get()
         requestingClient = op[1]
@@ -365,7 +373,10 @@ def onForwardOperation(msg):
     for sock in otherServers:
         if(sock[1] == hintedLeader and sock[1] not in failedLinks):
             msg.val = serverPID
-            sock[0].sendall(msg.getReadyToSend())
+            try:
+                sock[0].sendall(msg.getReadyToSend())
+            except socket.error:
+                sock[0].close()
 
     time.sleep(15)
     if not receivedACK:
@@ -418,7 +429,8 @@ def onNewClientConnection(clientSocket, addr, pid):
             if((msg.command == 'get' or msg.command == 'put') and hintedLeader == serverPID):
                 OPqueue.put([msg.other, msg.senderPID, 0])
                 if(myVal == None):
-                    threading.Thread(target=sendAcceptMessages).start()
+                    threading.Thread(target=sendAcceptMessages,
+                                     args=(True,)).start()
             if(msg.command == 'leader' and hintedLeader != serverPID):
                 threading.Thread(target=handleLeaderCommand).start()
             print(msg.command)
@@ -487,7 +499,10 @@ def userInput():
                         sock[0].close()
             for sock in otherClients:
                 if(sock[1] == str(pid) and sock[1] not in failedLinks):
-                    sock[0].sendall(test)
+                    try:
+                        sock[0].sendall(test)
+                    except socket.error:
+                        sock[0].close()
         elif(command == 'hintedLeader'):
             print(hintedLeader)
         elif(command == 'failLink'):

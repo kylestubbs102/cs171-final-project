@@ -46,7 +46,11 @@ class blockchain:
 
     def add(self, block, index):
         # need to account for if server missed out on an index?
-        self.blockchain.append(block)
+        emptyData = ("operation", "nonce", "hash")
+        while(len(self.blockchain) <= index + 1):
+            self.blockchain.append(emptyData)
+
+        self.blockchain[index] = block
 
         self.writeToFile()
 
@@ -68,7 +72,9 @@ class blockchain:
         tempDict = {}
 
         for block in self.blockchain:
-            blockOP = block[0].split(" ")
+            blockOP = ""
+            if(block):
+                blockOP = block[0].split(" ")
             if(blockOP[0] == "put"):
                 tempDict[blockOP[1]] = blockOP[2]
         return tempDict
