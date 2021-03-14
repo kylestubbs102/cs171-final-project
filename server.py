@@ -118,8 +118,6 @@ def onNewServerConnection(serverSocket, addr):
                 numReceivedPromises += 1
                 receivedPromises.append(msg)
 
-                # handles the case of all four servers responding
-                # server will start two threads total (receives) ???? need to think more about
                 if(numReceivedPromises >= 2 and (hintedLeader == None or hintedLeader != serverPID)):
                     threading.Thread(target=receiveMajorityPromises).start()
                 lock.release()
@@ -206,7 +204,6 @@ def receiveMajorityAccepted():
     keyvalue = bc.recreateKV()
     operation = myVal[0].split(" ")
     print("operation", operation)
-    print("keyvalue.keys()", keyvalue.keys())
     opCommand = operation[0]
 
     # Reset paxos vars
@@ -290,8 +287,6 @@ def handleAcceptCommand(newBallotNum, newVal):
     global AcceptVal
     global AcceptNum
 
-    print("newBallotNum", newBallotNum)
-    print("BallotNum", BallotNum)
     if (compareBallots(newBallotNum, BallotNum)):
         AcceptNum = newBallotNum
         AcceptVal = newVal
@@ -365,8 +360,6 @@ def resetPaxosVars():
     global alreadySentAccepted
     alreadySentAccepted = False
 
-    print("BallotNum is reset to ", BallotNum)
-
 
 def onForwardOperation(msg):
     global receivedACK
@@ -438,6 +431,8 @@ def onNewClientConnection(clientSocket, addr, pid):
 
 def watch():
     global serverSock
+    global otherServers
+    global otherClients
     serverSock = socket.socket()
     serverSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     serverSock.bind((socket.gethostname(), configData[sys.argv[1]]))
@@ -449,6 +444,7 @@ def watch():
         if 'server' in msg_recv:
             threading.Thread(target=onNewServerConnection,
                              args=(c, addr)).start()
+
         else:
             threading.Thread(target=onNewClientConnection,
                              args=(c, addr, msgs[1])).start()

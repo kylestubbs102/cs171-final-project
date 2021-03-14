@@ -10,7 +10,7 @@ from utility import message as m
 from datetime import datetime
 
 servers = []
-serverListeners = []
+
 configData = None
 clientSock = None
 clientPID = None
@@ -66,15 +66,6 @@ def userInput():
             msg = m(command, clientPID, x)
             threading.Thread(target=onPutOrGetCommand,
                              args=(msg, [hintedLeader])).start()
-            # if(hintedLeader == None):
-            #     selectedServer = str(random.randint(1, 5))
-            #     for sock in servers:
-            #         if sock[1] == selectedServer:
-            #             sock[0].sendall(msg.getReadyToSend())
-            # else:
-            #     for sock in servers:
-            #         if sock[1] == hintedLeader:
-            #             sock[0].sendall(msg.getReadyToSend())
 
 
 def onPutOrGetCommand(msg, serversTried):
@@ -107,17 +98,11 @@ def onPutOrGetCommand(msg, serversTried):
                 break
     else:
         receiveACK = False
-        # for sock in servers:
-        #     if sock[1] != hintedLeader:
-        #         sock[0].sendall(msg.getReadyToSend())
-        #         threading.Thread(target=onPutOrGetCommand, args=(msg)).start()
-        #         break
 
 
 def onNewServerConnection(serverSocket, addr):
     global hintedLeader
     global receiveACK
-    serverListeners.append(serverSocket)
     serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
     while True:
@@ -142,6 +127,7 @@ def onNewServerConnection(serverSocket, addr):
 
 def watch():
     global clientSock
+    global servers
     clientSock = socket.socket()
     clientSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     clientSock.bind((socket.gethostname(), configData[sys.argv[1]]))
