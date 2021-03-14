@@ -20,6 +20,7 @@ hintedLeader = None
 receiveACK = False
 delay = 15
 
+
 def doExit():
     global servers
     global clientSock
@@ -35,7 +36,7 @@ def userInput():
     while True:
         x = input()
 
-        commandList = x.split(" ")
+        commandList = x.split(" ", 2)
         command = commandList[0].strip()
         if(command == 'connect'):
             threading.Thread(target=connectToServers).start()
@@ -46,8 +47,7 @@ def userInput():
                 sock[0].sendall(send)
         elif(command == 'send'):
             pid = commandList[1]
-            test = "testing individual from client " + str(clientPID)
-            send = m(test, clientPID).getReadyToSend()
+            send = m("put", clientPID, commandList[2]).getReadyToSend()
             for sock in servers:
                 if(sock[1] == str(pid)):
                     sock[0].sendall(send)
@@ -64,7 +64,8 @@ def userInput():
             doExit()
         elif(command == 'put' or command == 'get'):
             msg = m(command, clientPID, x)
-            threading.Thread(target=onPutOrGetCommand, args=(msg, [hintedLeader])).start()
+            threading.Thread(target=onPutOrGetCommand,
+                             args=(msg, [hintedLeader])).start()
             # if(hintedLeader == None):
             #     selectedServer = str(random.randint(1, 5))
             #     for sock in servers:
@@ -78,6 +79,7 @@ def userInput():
 
 def onPutOrGetCommand(msg, serversTried):
     global hintedLeader
+    global receiveACK
     if(hintedLeader == None):
         selectedServer = str(random.randint(1, 5))
         for sock in servers:
@@ -88,20 +90,25 @@ def onPutOrGetCommand(msg, serversTried):
             if sock[1] == hintedLeader:
                 sock[0].sendall(msg.getReadyToSend())
     time.sleep(15)
+    print("receivedACK:", receiveACK)
     if not receiveACK:
         for sock in servers:
             if sock[1] not in serversTried:
                 serversTried.append(sock[1])
                 hintedLeader = sock[1]
-                threading.Thread(msg, serversTried)
+                leaderMsg = m("leader", clientPID).getReadyToSend()
+                sock[0].sendall(leaderMsg)
+                time.sleep(8)
+                threading.Thread(target=onPutOrGetCommand,
+                                 args=(msg, serversTried)).start()
                 break
-        
+    else:
+        receiveACK = False
         # for sock in servers:
         #     if sock[1] != hintedLeader:
         #         sock[0].sendall(msg.getReadyToSend())
         #         threading.Thread(target=onPutOrGetCommand, args=(msg)).start()
         #         break
-
 
 
 def onNewServerConnection(serverSocket, addr):
@@ -124,9 +131,10 @@ def onNewServerConnection(serverSocket, addr):
                 hintedLeader = msg.senderPID
                 lock.release()
             print(msg.command)
+            if(msg.command == "info"):
+                print("get command result", msg.val)
             if (msg.command == "ack"):
                 receiveACK = True
-
 
 
 def watch():
