@@ -43,6 +43,16 @@ requestingServer = None
 alreadySentAccepted = False
 
 
+def broadcastToOtherServers(msg):
+    global otherServers
+    for sock in otherServers:
+        if(sock[1] not in failedLinks):
+            try:
+                sock[0].sendall(msg)
+            except socket.error:
+                sock[0].close()
+
+
 def connectToServers():
     global otherServers
 
@@ -128,6 +138,42 @@ def onNewServerConnection(serverSocket, addr):
     serverSocket.close()
 
 
+def handleLeaderCommand():
+    global BallotNum
+    global lock
+    lock.acquire()
+    BallotNum[0] += AcceptNum[0] + 1
+    lock.release()
+
+    time.sleep(delay)
+    prepare = message("prepare", serverPID)
+    prepare.BallotNum = BallotNum
+
+    broadcastToOtherServers(prepare.getReadyToSend())
+
+
+def handlePrepareCommand(recBallot):
+    global BallotNum
+    global AcceptNum
+    global AcceptVal
+
+    if(compareBallots(recBallot, BallotNum)):
+        time.sleep(delay)
+        for sock in otherServers:
+            if((int(sock[1]) == int(recBallot[1])) and (str(recBallot[1]) not in failedLinks)):
+                lock.acquire()
+                promise = "promise"
+                promise = message(promise, serverPID)
+                promise.BallotNum = BallotNum
+                promise.AcceptNum = AcceptNum
+                promise.AcceptVal = AcceptVal
+                try:
+                    sock[0].sendall(promise.getReadyToSend())
+                except socket.error:
+                    sock[0].close()
+                lock.release()
+
+
 def receiveMajorityPromises():
     global hintedLeader
     global myVal
@@ -174,14 +220,45 @@ def receiveMajorityPromises():
         # or use a val gained here
 
 
-def broadcastToOtherServers(msg):
-    global otherServers
-    for sock in otherServers:
-        if(sock[1] not in failedLinks):
-            try:
-                sock[0].sendall(msg)
-            except socket.error:
-                sock[0].close()
+def handleAcceptCommand(newBallotNum, newVal):
+    global BallotNum
+    global AcceptVal
+    global AcceptNum
+
+    if (compareBallots(newBallotNum, BallotNum)):
+        AcceptNum = newBallotNum
+        AcceptVal = newVal
+        for sock in otherServers:
+            if sock[1] not in failedLinks and sock[1] == hintedLeader:
+                msg = message("accepted", serverPID)
+                msg.val = AcceptVal
+                msg.BallotNum = BallotNum
+                time.sleep(delay)
+                try:
+                    sock[0].sendall(msg.getReadyToSend())
+                except:
+                    sock[0].close()
+                break
+
+
+def sendAcceptMessages(startFromPhaseTwo):
+    global BallotNum
+    global myVal
+    global requestingClient
+    global requestingServer
+
+    if startFromPhaseTwo:
+        BallotNum[0] += 1
+    if myVal == None:
+        op = OPqueue.get()
+        requestingClient = op[1]
+        requestingServer = op[2]
+        myVal = bc.mine(op[0])
+    msg = message("accept", serverPID)
+    msg.val = myVal
+    msg.BallotNum = BallotNum
+    time.sleep(delay)
+    broadcastToOtherServers(msg.getReadyToSend())
 
 
 def receiveMajorityAccepted():
@@ -206,12 +283,13 @@ def receiveMajorityAccepted():
     print("operation", operation)
     opCommand = operation[0]
 
+    # send decide to all other servers
+    broadcastToOtherServers(msg.getReadyToSend())
+
     # Reset paxos vars
     resetPaxosVars()
     print("paxos vars reset")
     time.sleep(delay)
-
-    broadcastToOtherServers(msg.getReadyToSend())
 
     msg = message("ack", serverPID)
     for sock in otherClients:
@@ -249,26 +327,6 @@ def receiveMajorityAccepted():
         sendAcceptMessages(True)
 
 
-def sendAcceptMessages(startFromPhaseTwo):
-    global BallotNum
-    global myVal
-    global requestingClient
-    global requestingServer
-
-    if startFromPhaseTwo:
-        BallotNum[0] += 1
-    if myVal == None:
-        op = OPqueue.get()
-        requestingClient = op[1]
-        requestingServer = op[2]
-        myVal = bc.mine(op[0])
-    msg = message("accept", serverPID)
-    msg.val = myVal
-    msg.BallotNum = BallotNum
-    time.sleep(delay)
-    broadcastToOtherServers(msg.getReadyToSend())
-
-
 def handleDecideCommand(newBallotNum, newVal):
     global myVal
     global bc
@@ -280,63 +338,6 @@ def handleDecideCommand(newBallotNum, newVal):
     resetPaxosVars()
 
     keyvalue = bc.recreateKV()
-
-
-def handleAcceptCommand(newBallotNum, newVal):
-    global BallotNum
-    global AcceptVal
-    global AcceptNum
-
-    if (compareBallots(newBallotNum, BallotNum)):
-        AcceptNum = newBallotNum
-        AcceptVal = newVal
-        for sock in otherServers:
-            if sock[1] not in failedLinks and sock[1] == hintedLeader:
-                msg = message("accepted", serverPID)
-                msg.val = AcceptVal
-                msg.BallotNum = BallotNum
-                time.sleep(delay)
-                try:
-                    sock[0].sendall(msg.getReadyToSend())
-                except:
-                    sock[0].close()
-                break
-
-
-def handlePrepareCommand(recBallot):
-    global BallotNum
-    global AcceptNum
-    global AcceptVal
-
-    if(compareBallots(recBallot, BallotNum)):
-        time.sleep(delay)
-        for sock in otherServers:
-            if((int(sock[1]) == int(recBallot[1])) and (str(recBallot[1]) not in failedLinks)):
-                lock.acquire()
-                promise = "promise"
-                promise = message(promise, serverPID)
-                promise.BallotNum = BallotNum
-                promise.AcceptNum = AcceptNum
-                promise.AcceptVal = AcceptVal
-                try:
-                    sock[0].sendall(promise.getReadyToSend())
-                except socket.error:
-                    sock[0].close()
-                lock.release()
-
-
-def handleLeaderCommand():
-    global BallotNum
-    global lock
-    lock.acquire()
-    BallotNum[0] += AcceptNum[0] + 1
-    lock.release()
-
-    time.sleep(delay)
-    prepare = message("prepare", serverPID)
-    prepare.BallotNum = BallotNum
-
-    broadcastToOtherServers(prepare.getReadyToSend())
 
 
 def resetPaxosVars():
