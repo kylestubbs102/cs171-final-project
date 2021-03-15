@@ -71,6 +71,7 @@ def userInput():
 def onPutOrGetCommand(msg, serversTried):
     global hintedLeader
     global receiveACK
+    receiveACK = False
     if(hintedLeader == None):
         selectedServer = str(random.randint(1, 5))
         for sock in servers:

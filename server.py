@@ -41,6 +41,7 @@ numReceivedAccepted = 0
 requestingClient = None
 requestingServer = None
 alreadySentAccepted = False
+phaseTwoAlreadyInProcess = False
 
 
 def broadcastToOtherServers(msg):
@@ -73,6 +74,7 @@ def onNewServerConnection(serverSocket, addr):
     global receivedAccepted
     global hintedLeader
     global receivedACK
+    global phaseTwoAlreadyInProcess
     # handle messages from other clients
     print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
     serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -90,7 +92,9 @@ def onNewServerConnection(serverSocket, addr):
 
             if((msg.command == 'get' or msg.command == 'put') and hintedLeader == serverPID):
                 OPqueue.put([msg.other, msg.senderPID, msg.val])
-                if(myVal == None):
+                if(myVal == None and not phaseTwoAlreadyInProcess):
+                    print("SPOT 3 *************")
+                    phaseTwoAlreadyInProcess = True
                     threading.Thread(target=sendAcceptMessages,
                                      args=(True,)).start()
 
@@ -182,6 +186,7 @@ def receiveMajorityPromises():
     global BallotNum
     global receivedPromises
     global numReceivedPromises
+    global phaseTwoAlreadyInProcess
 
     notAllBottom = False
     # think about logic for setting myVal
@@ -214,7 +219,9 @@ def receiveMajorityPromises():
 
     # start Phase 2 if myVal != None
     # start a thread
-    if(myVal != None or not OPqueue.empty()):
+    if(myVal != None or not OPqueue.empty() and not phaseTwoAlreadyInProcess):
+        phaseTwoAlreadyInProcess = True
+        print("SPOT 2 ***********")
         threading.Thread(target=sendAcceptMessages, args=(False,)).start()
         # phase 2 will either start with popping an operation from queue and mining it
         # or use a val gained here
@@ -268,6 +275,7 @@ def receiveMajorityAccepted():
     global alreadySentAccepted
     global requestingClient
     global requestingServer
+    global phaseTwoAlreadyInProcess
 
     numReceivedAccepted = 0
     msg = message("decide", serverPID)
@@ -288,6 +296,7 @@ def receiveMajorityAccepted():
 
     # Reset paxos vars
     resetPaxosVars()
+
     print("paxos vars reset")
     time.sleep(delay)
 
@@ -321,9 +330,11 @@ def receiveMajorityAccepted():
 
     requestingClient = None
     requestingServer = None
+    phaseTwoAlreadyInProcess = False
     # restart paxos if more operations in queue
     if(not OPqueue.empty() and myVal == None):
         print("restart paxos from phase 2")
+        phaseTwoAlreadyInProcess = True
         sendAcceptMessages(True)
 
 
@@ -374,7 +385,7 @@ def onForwardOperation(msg):
 
     time.sleep(15)
     if not receivedACK:
-        OPqueue.put([msg.other, msg.senderPID, 0])
+        # OPqueue.put([msg.other, msg.senderPID, 0])
         threading.Thread(target=handleLeaderCommand).start()
     else:
         receivedACK = False
@@ -397,6 +408,7 @@ def connectToClients():
 def onNewClientConnection(clientSocket, addr, pid):
     global otherClients
     global OPqueue
+    global phaseTwoAlreadyInProcess
     print(f'{datetime.now().strftime("%H:%M:%S")} connection from', addr)
     clientSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     while True:
@@ -422,7 +434,9 @@ def onNewClientConnection(clientSocket, addr, pid):
 
             if((msg.command == 'get' or msg.command == 'put') and hintedLeader == serverPID):
                 OPqueue.put([msg.other, msg.senderPID, 0])
-                if(myVal == None):
+                if(myVal == None and not phaseTwoAlreadyInProcess):
+                    print("SPOT 1 *************")
+                    phaseTwoAlreadyInProcess = True
                     threading.Thread(target=sendAcceptMessages,
                                      args=(True,)).start()
             if(msg.command == 'leader' and hintedLeader != serverPID):

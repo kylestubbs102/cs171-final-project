@@ -72,13 +72,10 @@ class blockchain:
         tempDict = {}
 
         for block in self.blockchain:
-            print(block)
-            print(type(block))
 
             blockOP = ""
             if(block):
                 blockOP = block[0].split(" ")
-            print(blockOP)
             if((blockOP != None or blockOP != "") and blockOP[0] == "put"):
                 tempDict[blockOP[1]] = blockOP[2]
         return tempDict
