@@ -33,13 +33,18 @@ keyvalue = {}
 BallotNum = [0, 0, 0]      # order: <seq_num, pid, depth>
 AcceptNum = [0, 0, 0]
 AcceptVal = None
+
 myVal = None
+myId = None
+
 receivedPromises = []
 receivedAccepted = []
 numReceivedPromises = 0
 numReceivedAccepted = 0
+
 requestingClient = None
 requestingServer = None
+
 alreadySentAccepted = False
 phaseTwoAlreadyInProcess = False
 
@@ -88,19 +93,19 @@ def onNewServerConnection(serverSocket, addr):
         if(msg != b''):
             msg = pickle.loads(msg)
             print(
-                f'{datetime.now().strftime("%H:%M:%S")} message from {addr}:', msg.command)
+                f'{datetime.now().strftime("%H:%M:%S")} From {msg.senderPID}:', msg.command)
 
             if((msg.command == 'get' or msg.command == 'put') and hintedLeader == serverPID):
-                OPqueue.put([msg.other, msg.senderPID, msg.val])
+                OPqueue.put([msg.operation, msg.senderPID, msg.val, msg.other])
                 if(myVal == None and not phaseTwoAlreadyInProcess):
-                    print("SPOT 3 *************")
+                    print("**** Starting Phase 2 ****")
                     phaseTwoAlreadyInProcess = True
                     threading.Thread(target=sendAcceptMessages,
                                      args=(True,)).start()
 
             if(msg.command == 'accept'):
                 threading.Thread(target=handleAcceptCommand, args=(
-                    msg.BallotNum, msg.val)).start()
+                    msg.BallotNum, msg.val, msg.other)).start()
 
             if(msg.command == 'accepted'):
                 lock.acquire()
@@ -113,7 +118,7 @@ def onNewServerConnection(serverSocket, addr):
 
             if(msg.command == 'decide' and msg.senderPID == hintedLeader):
                 threading.Thread(target=handleDecideCommand, args=(
-                    msg.BallotNum, msg.val)).start()
+                    msg.BallotNum, msg.val, msg.other)).start()
 
             if(msg.command == 'leader'):
                 threading.Thread(target=handleLeaderCommand).start()
@@ -150,6 +155,7 @@ def handleLeaderCommand():
     lock.release()
 
     time.sleep(delay)
+    print("***** Starting Phase 1 *****")
     prepare = message("prepare", serverPID)
     prepare.BallotNum = BallotNum
 
@@ -167,7 +173,7 @@ def handlePrepareCommand(recBallot):
             if((int(sock[1]) == int(recBallot[1])) and (str(recBallot[1]) not in failedLinks)):
                 lock.acquire()
                 promise = "promise"
-                promise = message(promise, serverPID)
+                promise = message(promise, serverPID, myId)
                 promise.BallotNum = BallotNum
                 promise.AcceptNum = AcceptNum
                 promise.AcceptVal = AcceptVal
@@ -181,6 +187,7 @@ def handlePrepareCommand(recBallot):
 def receiveMajorityPromises():
     global hintedLeader
     global myVal
+    global myId
     global AcceptVal
     global AcceptNum
     global BallotNum
@@ -200,6 +207,7 @@ def receiveMajorityPromises():
                 highestBallotMsg = promise
         AcceptNum = highestBallotMsg.AcceptNum
         myVal = highestBallotMsg.AcceptVal
+        myId = highestBallotMsg.AcceptVal[3]
     else:
         AcceptNum = BallotNum
         # compare ballots function
@@ -221,23 +229,27 @@ def receiveMajorityPromises():
     # start a thread
     if(myVal != None or not OPqueue.empty() and not phaseTwoAlreadyInProcess):
         phaseTwoAlreadyInProcess = True
-        print("SPOT 2 ***********")
+        print("**** Starting Phase 2 ****")
+        # print("val", myVal)
+        # print("myId", myId)
         threading.Thread(target=sendAcceptMessages, args=(False,)).start()
         # phase 2 will either start with popping an operation from queue and mining it
         # or use a val gained here
 
 
-def handleAcceptCommand(newBallotNum, newVal):
+def handleAcceptCommand(newBallotNum, newVal, uid):
     global BallotNum
     global AcceptVal
     global AcceptNum
+    global myId
 
     if (compareBallots(newBallotNum, BallotNum)):
         AcceptNum = newBallotNum
         AcceptVal = newVal
+        myId = uid
         for sock in otherServers:
             if sock[1] not in failedLinks and sock[1] == hintedLeader:
-                msg = message("accepted", serverPID)
+                msg = message("accepted", serverPID, uid)
                 msg.val = AcceptVal
                 msg.BallotNum = BallotNum
                 time.sleep(delay)
@@ -253,14 +265,19 @@ def sendAcceptMessages(startFromPhaseTwo):
     global myVal
     global requestingClient
     global requestingServer
+    global myId
 
     if startFromPhaseTwo:
         BallotNum[0] += 1
     if myVal == None:
         op = OPqueue.get()
+        # print("op is", op)
         requestingClient = op[1]
         requestingServer = op[2]
-        myVal = bc.mine(op[0])
+        myVal = bc.mine(op[0], op[3])
+        myId = op[3]
+    # PUT IN CHECK HERE?
+
     msg = message("accept", serverPID)
     msg.val = myVal
     msg.BallotNum = BallotNum
@@ -278,17 +295,20 @@ def receiveMajorityAccepted():
     global phaseTwoAlreadyInProcess
 
     numReceivedAccepted = 0
-    msg = message("decide", serverPID)
+    msg = message("decide", serverPID, myId)
     msg.val = myVal
     msg.BallotNum = BallotNum
     alreadySentAccepted = True
 
     # Add block to block chain
     # update KV store
-    bc.add(myVal, BallotNum[2])
+    bc.add(myVal, BallotNum[2], myId)
     keyvalue = bc.recreateKV()
-    operation = myVal[0].split(" ")
-    print("operation", operation)
+    if myVal != None:
+        operation = myVal[0].split(" ")
+    else:
+        operation = "dummy"
+    # print("operation", operation)
     opCommand = operation[0]
 
     # send decide to all other servers
@@ -297,7 +317,7 @@ def receiveMajorityAccepted():
     # Reset paxos vars
     resetPaxosVars()
 
-    print("paxos vars reset")
+    print("**** End Decide Phase ****")
     time.sleep(delay)
 
     msg = message("ack", serverPID)
@@ -333,17 +353,17 @@ def receiveMajorityAccepted():
     phaseTwoAlreadyInProcess = False
     # restart paxos if more operations in queue
     if(not OPqueue.empty() and myVal == None):
-        print("restart paxos from phase 2")
+        print("**** Starting Phase 2 ****")
         phaseTwoAlreadyInProcess = True
         sendAcceptMessages(True)
 
 
-def handleDecideCommand(newBallotNum, newVal):
+def handleDecideCommand(newBallotNum, newVal, uid):
     global myVal
     global bc
     global keyvalue
     myVal = newVal
-    bc.add(myVal, newBallotNum[2])
+    bc.add(myVal, newBallotNum[2], uid)
 
     # reset paxos vars
     resetPaxosVars()
@@ -371,6 +391,8 @@ def resetPaxosVars():
     numReceivedAccepted = 0
     global alreadySentAccepted
     alreadySentAccepted = False
+    global myId
+    myId = None
 
 
 def onForwardOperation(msg):
@@ -389,6 +411,23 @@ def onForwardOperation(msg):
         threading.Thread(target=handleLeaderCommand).start()
     else:
         receivedACK = False
+
+
+def sendACK(pid):
+    time.sleep(delay)
+    msg = message("ack", serverPID).getReadyToSend()
+    for sock in otherServers:
+        if sock[1] == pid:
+            try:
+                sock[0].sendall(msg)
+            except socket.error:
+                sock[0].close()
+    for sock in otherClients:
+        if sock[1] == pid:
+            try:
+                sock[0].sendall(msg)
+            except socket.error:
+                sock[0].close()
 
 
 def connectToClients():
@@ -425,23 +464,32 @@ def onNewClientConnection(clientSocket, addr, pid):
             # 3. receive op and am not hinted leader (forward to hinted leader with timeout)
             msg = pickle.loads(msg)
             if((msg.command == 'get' or msg.command == 'put') and hintedLeader == None):
-                OPqueue.put([msg.other, msg.senderPID, 0])
-                threading.Thread(target=handleLeaderCommand).start()
-            if((msg.command == 'get' or msg.command == 'put') and hintedLeader != serverPID and hintedLeader != None):
-                # NEED A TIMEOUT HERE
+                if((not bc.checkUID(msg.other)) and myId != msg.other):
+                    OPqueue.put([msg.operation, msg.senderPID, 0, msg.other])
+                    threading.Thread(target=handleLeaderCommand).start()
+                else:
+                    threading.Thread(target=sendACK, args=(
+                        msg.senderPID,)).start()
+
+            elif((msg.command == 'get' or msg.command == 'put') and hintedLeader != serverPID and hintedLeader != None):
                 threading.Thread(target=onForwardOperation,
                                  args=(msg,)).start()
 
-            if((msg.command == 'get' or msg.command == 'put') and hintedLeader == serverPID):
-                OPqueue.put([msg.other, msg.senderPID, 0])
-                if(myVal == None and not phaseTwoAlreadyInProcess):
-                    print("SPOT 1 *************")
+            elif((msg.command == 'get' or msg.command == 'put') and hintedLeader == serverPID):
+                if((not bc.checkUID(msg.other)) and myId != msg.other):
+                    OPqueue.put([msg.operation, msg.senderPID, 0, msg.other])
+                else:
+                    threading.Thread(target=sendACK, args=(
+                        msg.senderPID,)).start()
+                if(myVal == None and not phaseTwoAlreadyInProcess and not OPqueue.empty()):
+                    print("**** Starting Phase 2 *****")
                     phaseTwoAlreadyInProcess = True
                     threading.Thread(target=sendAcceptMessages,
                                      args=(True,)).start()
-            if(msg.command == 'leader' and hintedLeader != serverPID):
+            elif(msg.command == 'leader' and hintedLeader != serverPID):
                 threading.Thread(target=handleLeaderCommand).start()
-            print(msg.command)
+            print(
+                f'{datetime.now().strftime("%H:%M:%S")} From {msg.senderPID}:', msg.command)
 
 
 def watch():
@@ -528,6 +576,7 @@ def userInput():
             # example: fixLink 1 2
             if(commandList[1] == serverPID):
                 failedLinks.remove(commandList[2])
+                print("Current failedLinks: ", failedLinks)
             else:
                 print("please enter valid source for server {s}".format(
                     s=serverPID))
@@ -560,6 +609,7 @@ def main():
     keyvalue = bc.recreateKV()
 
     BallotNum[1] = int(serverPID)
+    BallotNum[2] = int(bc.getLength())
 
     # print(configData[clientPID])
 

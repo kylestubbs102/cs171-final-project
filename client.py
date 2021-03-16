@@ -6,6 +6,7 @@ import time
 import json
 import pickle
 import random
+import uuid
 from utility import message as m
 from datetime import datetime
 
@@ -18,7 +19,10 @@ lock = threading.Lock()
 
 hintedLeader = None
 receiveACK = False
-delay = 15
+
+sendDelay = 3
+timeoutDelay = 18
+leaderDelay = 10
 
 
 def doExit():
@@ -47,23 +51,32 @@ def userInput():
                 sock[0].sendall(send)
         elif(command == 'send'):
             pid = commandList[1]
-            send = m("put", clientPID, commandList[2]).getReadyToSend()
+            msg = commandList[2].split(" ")
+            uniqueID = str(uuid.uuid4().hex)
+            send = m(msg[0], clientPID, uniqueID)
+            send.operation = commandList[2]
+            send = send.getReadyToSend()
+            time.sleep(sendDelay)
             for sock in servers:
                 if(sock[1] == str(pid)):
                     sock[0].sendall(send)
-        elif(command == 'sendleader'):
+        elif(command == 'sendleader' or command == 'sendLeader'):
             # example: sendleader 1
             pid = commandList[1]
+            time.sleep(sendDelay)
             message = m("leader", clientPID).getReadyToSend()
             for sock in servers:
                 if(sock[1] == str(pid)):
                     sock[0].sendall(message)
-        elif(command == 'hintedLeader'):
-            print(hintedLeader)
+        elif(command == 'hintedLeader' or command == 'hintedleader'):
+            print("Current Leader:", hintedLeader)
         elif(command == 'exit' or command == 'failProcess'):
             doExit()
         elif(command == 'put' or command == 'get'):
-            msg = m(command, clientPID, x)
+            uniqueID = str(uuid.uuid4().hex)
+            msg = m(command, clientPID, uniqueID)
+            msg.operation = x
+
             threading.Thread(target=onPutOrGetCommand,
                              args=(msg, [hintedLeader])).start()
 
@@ -72,6 +85,7 @@ def onPutOrGetCommand(msg, serversTried):
     global hintedLeader
     global receiveACK
     receiveACK = False
+    time.sleep(sendDelay)
     if(hintedLeader == None):
         selectedServer = str(random.randint(1, 5))
         for sock in servers:
@@ -84,16 +98,16 @@ def onPutOrGetCommand(msg, serversTried):
                     sock[0].sendall(msg.getReadyToSend())
                 except socket.error:
                     sock[0].close()
-    time.sleep(15)
+    time.sleep(timeoutDelay)
     print("receivedACK:", receiveACK)
     if not receiveACK:
         for sock in servers:
-            if sock[1] not in serversTried:
+            if sock[1] not in serversTried and hintedLeader not in serversTried:
                 serversTried.append(sock[1])
                 hintedLeader = sock[1]
                 leaderMsg = m("leader", clientPID).getReadyToSend()
                 sock[0].sendall(leaderMsg)
-                time.sleep(8)
+                time.sleep(leaderDelay)
                 threading.Thread(target=onPutOrGetCommand,
                                  args=(msg, serversTried)).start()
                 break
@@ -115,11 +129,12 @@ def onNewServerConnection(serverSocket, addr):
             serverSocket.close()
         if (msg != b''):
             msg = pickle.loads(msg)
+            print(
+                f'{datetime.now().strftime("%H:%M:%S")} From {msg.senderPID}:', msg.command)
             if(msg.command == 'hintedLeader'):
                 lock.acquire()
                 hintedLeader = msg.senderPID
                 lock.release()
-            print(msg.command)
             if(msg.command == "info"):
                 print("get command result", msg.val)
             if (msg.command == "ack"):
@@ -155,6 +170,7 @@ def main():
     global configData
     global clientSock
     global clientPID
+
     f = open('config.json')
     configData = json.load(f)
     f.close()

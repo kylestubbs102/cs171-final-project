@@ -8,22 +8,28 @@ import random
 class blockchain:
     def __init__(self, fname):
         self.blockchain = []
+        self.operationIDs = set()
         self.fname = fname
         self.readFromFile()
 
     # input: operation as a string
     # adds operation block to blockchain
-    def mine(self, op):
+    def mine(self, op, uid):
         operation = str(op)
         hash = None
         nonce = None
+
         # calculate hash
         if(len(self.blockchain) == 0):
             hash = ""
         else:
             lastBlock = self.blockchain[-1]
-            hash = str(lastBlock[0]) + str(lastBlock[1]) + str(lastBlock[2])
-            hash = hashlib.sha256(hash.encode()).hexdigest()
+            if lastBlock != None:
+                hash = str(lastBlock[0]) + \
+                    str(lastBlock[1]) + str(lastBlock[2])
+                hash = hashlib.sha256(hash.encode()).hexdigest()
+            else:
+                hash = ""
 
         # calculate nonce
         foundNonce = False
@@ -38,21 +44,26 @@ class blockchain:
                 foundNonce = True
 
         # everything should be strings
+        print("**** Generate Block ****")
         print("operation:", operation)
         print("nonnce:", nonce)
         print("hash:", hash)
-        block = (operation, nonce, hash)
+        print("uid:", uid)
+        print("*************************")
+        block = (operation, nonce, hash, uid)
         return block
 
-    def add(self, block, index):
+    def add(self, block, index, uid):
         # need to account for if server missed out on an index?
-        emptyData = ("operation", "nonce", "hash")
-        while(len(self.blockchain) < index + 1):
-            self.blockchain.append(emptyData)
+        if(uid not in self.operationIDs):
+            self.operationIDs.add(uid)
+            emptyData = ("operation", "nonce", "hash")
+            while(len(self.blockchain) < index + 1):
+                self.blockchain.append(emptyData)
 
-        self.blockchain[index] = block
+            self.blockchain[index] = block
 
-        self.writeToFile()
+            self.writeToFile()
 
     # writes blockchain to file
     def writeToFile(self):
@@ -76,10 +87,19 @@ class blockchain:
             blockOP = ""
             if(block):
                 blockOP = block[0].split(" ")
-            if((blockOP != None or blockOP != "") and blockOP[0] == "put"):
+            if(blockOP != None and blockOP != "" and blockOP[0] == "put"):
                 tempDict[blockOP[1]] = blockOP[2]
         return tempDict
 
     def print(self):
         for i in self.blockchain:
             print(i)
+
+    def getLength(self):
+        return len(self.blockchain)
+
+    def checkUID(self, uid):
+        if(uid in self.operationIDs):
+            return True
+        else:
+            return False
